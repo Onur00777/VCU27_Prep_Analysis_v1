@@ -1,0 +1,351 @@
+# IST27 VCU27 log semasi
+# Kaynak: vcu27_prep/Common/Inc/log_frame.h, Common/Src/datalogger.c,
+#         CM7/App/app_tasks.c, can_ids.h, vehicle_config.h, vehicle_io.c, inverter_amk.c
+# SD CSV ayiraci ';' . CM4 dosya adi: /IST27/DD_MM_YY-hh_mm_ss.csv
+
+meta:
+  vehicle: IST27
+  firmware: vcu27_prep
+  mcu: STM32H745 (CM7 kontrol + CM4 FatFS)
+  log_rate_hz: 100
+  control_period_ms: 10
+  can_drain_period_ms: 2
+  csv_separator: ";"
+  csv_header_locked: true
+  frame_bytes: 96
+  ring_depth: 32
+  bridge_addr: "0x38001000"
+  flush_bytes: 4096
+  sync_period_ms: 2000
+  notes:
+    - "Her kontrol adiminda datalogger_push cagrilir; ornekleme 100 Hz."
+    - "pack_power_w isareti atilir: negatif (regen) 0 yazilir. Analiz gucunu pack_v * pack_i ile yeniden hesaplar."
+    - "dc_v_10mV / dc_i_10mA alanlari logda var ama inverter_amk.c DC barayi CAN'den doldurmuyor; gercek kayitta 0 beklenir."
+    - "dc_v_10mV int16. 327.67 V ustu (600 V mimari) tasmasi yapar. CSV metinse buyuk deger okunabilir; binary/firmware tasmasi 32767."
+    - "Fren logu uint8 bar; CAN kaynagi bar*1000, kesir kaybolur."
+    - "Direksiyon logu volan acisi (CAN 0x2A0, 0.01 deg). Yol tekeri orani olculmemis; varsayilan 5.5."
+
+vehicle:
+  name: IST27
+  drive: 4WD
+  motors: [fl, fr, rl, rr]
+  inverter_groups:
+    - id: Inverter_1
+      role: front_dual
+      channels: [fl, fr]
+    - id: Inverter_2
+      role: rear_dual
+      channels: [rl, rr]
+  hv:
+    architecture_v: 600
+    full_soc_min_v: 580
+    full_soc_max_v: 600
+    power_limit_w: 80000
+    hold_low_w: 78000
+    hold_high_w: 79900
+    early_derate_power_w: 70000
+    current_limit_a: 300
+    regen_limit_w: 20000
+    precharge_min_v: 200
+    sag_i_min_a: 20
+  lv:
+    architecture_v: 24
+    nominal_min_v: 24
+    nominal_max_v: 28
+    brownout_v: 21.5
+    logged: false
+  geometry:
+    wheel_radius_m: 0.20574
+    track_width_m: 1.220
+    wheelbase_m: 1.530
+    steer_ratio_handwheel_per_road: 5.5
+  apps:
+    dead_pct: 10
+    deviation_pp: 10
+    implaus_ms: 100
+    plaus_debounce_ms: 50
+    release_pct: 5
+    brake_cut_pct: 25
+    raw_min: 8000
+    raw_max: 52000
+  brake_pressed_bar: 10
+  torque_peak_nm_per_motor: 21
+  speed_setpoint_rpm: 4000
+  slip_spin: 0.08
+  slip_lock: -0.08
+  tv_inactive_nm: 1.5
+  tv_lag_warn_ms: 100
+  igbt_warn_c: 85
+  igbt_crit_c: 100
+  motor_warn_c: 110
+  motor_crit_c: 125
+  thermal_imbalance_c: 8
+  corner_steer_deg: 15
+  corner_exit_apps_pct: 70
+  blackbox_pre_ms: 500
+  blackbox_post_ms: 200
+  sensor_timeout_ms: 100
+  inverter_timeout_ms: 50
+  bms_timeout_ms: 100
+
+buses:
+  - name: FD_CAN1
+    hw: FDCAN1
+    logical: [powertrain]
+    role: "AMK inverter setpoint + actual"
+  - name: FD_CAN2
+    hw: FDCAN2
+    logical: [vehicle, dynamics]
+    bitrate: "500 kbit classic (VCU27_VEHICLE_BUS_CLASSIC_500K=1). FD modunda 1M/2M."
+    role: "BMS, fren, dashboard, IMU, direksiyon. Dinamik ID'ler ayni fizik hatta ayrilir."
+
+can_messages:
+  - id: "0x184"
+    name: AMK_SET_FL
+    bus: FD_CAN1
+    dir: tx
+  - id: "0x185"
+    name: AMK_SET_FR
+    bus: FD_CAN1
+    dir: tx
+  - id: "0x188"
+    name: AMK_SET_RL
+    bus: FD_CAN1
+    dir: tx
+  - id: "0x189"
+    name: AMK_SET_RR
+    bus: FD_CAN1
+    dir: tx
+  - id: "0x283"
+    name: AMK_ACT1_FL
+    bus: FD_CAN1
+    dir: rx
+    layout: "b0 status, b2-3 rpm i16, b4-5 torque current i16 * 0.01 Nm"
+  - id: "0x284"
+    name: AMK_ACT1_FR
+    bus: FD_CAN1
+    dir: rx
+  - id: "0x287"
+    name: AMK_ACT1_RL
+    bus: FD_CAN1
+    dir: rx
+  - id: "0x288"
+    name: AMK_ACT1_RR
+    bus: FD_CAN1
+    dir: rx
+  - id: "0x285"
+    name: AMK_ACT2_FL
+    bus: FD_CAN1
+    dir: rx
+    layout: "b0-1 motor 0.1 C, b2-3 inverter 0.1 C, b4-5 error u16, b6-7 IGBT 0.1 C"
+  - id: "0x286"
+    name: AMK_ACT2_FR
+    bus: FD_CAN1
+    dir: rx
+  - id: "0x289"
+    name: AMK_ACT2_RL
+    bus: FD_CAN1
+    dir: rx
+  - id: "0x28A"
+    name: AMK_ACT2_RR
+    bus: FD_CAN1
+    dir: rx
+  - id: "0x060"
+    name: BMS_STATUS_FD
+    bus: FD_CAN2
+    dlc: 32
+    layout: "V u16 @16 /100, SOC u16 @18 /10000, I i16 @23 /10, faults u16 @25"
+  - id: "0x061"
+    name: BMS_PACK8
+    bus: FD_CAN2
+    dlc: 8
+    layout: "V u16 /100, I i16 /100, SOC u8, contactors u8. IST27 klasik ozet. Log bu olcegi kullanir."
+  - id: "0x100"
+    name: BMS_VOLT1
+    bus: FD_CAN2
+    logged: false
+  - id: "0x110"
+    name: BMS_VOLT2
+    bus: FD_CAN2
+    logged: false
+  - id: "0x120"
+    name: BMS_VOLT3
+    bus: FD_CAN2
+    logged: false
+  - id: "0x131"
+    name: LVBMS
+    bus: FD_CAN2
+    logged: false
+    note: "Kimlik var, cozucusu yok."
+  - id: "0x181"
+    name: BRAKE_FRONT
+    bus: FD_CAN2
+    layout: "i32 mbar (bar*1000)"
+  - id: "0x182"
+    name: BRAKE_REAR
+    bus: FD_CAN2
+    layout: "i32 mbar"
+  - id: "0x210"
+    name: DASH_RX
+    bus: FD_CAN2
+    layout: "pot1 u16, pot2 u16, b7 bit0 mode, bit1 start, bit2 log toggle"
+  - id: "0x220"
+    name: IMU
+    bus: FD_CAN2
+    layout: "accel i16/100 m/s2, gyro i16/16 dps, euler i16/16 deg. Loga yalnizca gyro Z yaw_cdps yazilir."
+  - id: "0x230"
+    name: GPS
+    bus: FD_CAN2
+    logged: false
+  - id: "0x2A0"
+    name: STEERING
+    bus: FD_CAN2
+    layout: "i16 /100 deg"
+  - id: "0x256"
+    name: VCU_STATUS
+    bus: FD_CAN2
+    dir: tx
+    rate_hz: 25
+  - id: "0x2B0"
+    name: CORNER_FL
+    bus: FD_CAN2
+    dir: tx
+    rate_hz: 20
+  - id: "0x2B1"
+    name: CORNER_FR
+    bus: FD_CAN2
+    dir: tx
+  - id: "0x2B2"
+    name: CORNER_RL
+    bus: FD_CAN2
+    dir: tx
+  - id: "0x2B3"
+    name: CORNER_RR
+    bus: FD_CAN2
+    dir: tx
+
+enums:
+  state:
+    0: INIT
+    1: HV_OFF
+    2: PRECHARGE
+    3: TS_ACTIVE
+    4: READY_TO_DRIVE
+    5: FAULT
+  drive_mode:
+    0: SAFE
+    1: NORMAL
+    2: RACE
+    3: LAUNCH
+    4: REVERSE
+  fault_reason:
+    0: NONE
+    1: SDC
+    2: PRECHARGE
+    3: INVERTER
+    4: BMS
+    5: IMD
+    6: AMS
+  inv_state:
+    0: OFFLINE
+    1: DISABLED
+    2: READY
+    3: DC_ON
+    4: ENABLED
+    5: ERROR
+  apps_status_bits:
+    0x01: LATCH
+    0x02: OUT_OF_RANGE
+    0x04: DEVIATION
+    0x08: IMPLAUS
+    0x10: BRAKE_CUT
+  sdc_flags_bits:
+    0x01: END_CLOSED
+    0x02: BSPD_OK
+    0x04: IMD_OK
+    0x08: AMS_OK
+    0x10: PRECHARGE_FB
+  log_state:
+    0: IDLE
+    1: MOUNTING
+    2: LOGGING
+    3: ERROR
+
+# resample: ffill -> durum/bayrak. Yoksa sayisal interpolate.
+signals:
+  - {csv: time_ms, eng: time_ms, scale: 1, unit: ms, logged: true, group: time, resample: time}
+  - {csv: state, eng: state, scale: 1, unit: enum, logged: true, group: state, resample: ffill}
+  - {csv: drive_mode, eng: drive_mode, scale: 1, unit: enum, logged: true, group: state, resample: ffill}
+  - {csv: apps_status, eng: apps_status, scale: 1, unit: bitfield, logged: true, group: driver, resample: ffill}
+  - {csv: apps_pct, eng: apps_pct, scale: 1, unit: pct, logged: true, group: driver}
+  - {csv: steer_cdeg, eng: steer_deg, scale: 0.01, unit: deg, logged: true, group: driver, source: "CAN 0x2A0 i16/100, sonra *100"}
+  - {csv: yaw_cdps, eng: yaw_dps, scale: 0.01, unit: deg/s, logged: true, group: driver, source: "IMU gyro Z i16/16 dps, sonra *100"}
+  - {csv: pack_v_10mV, eng: pack_v, scale: 0.01, unit: V, logged: true, group: hv, dtype: uint16, source: "BMS 0x061 u16/100 V"}
+  - {csv: pack_i_10mA, eng: pack_i, scale: 0.01, unit: A, logged: true, group: hv, dtype: int16, source: "BMS 0x061 i16/100 A. Pozitif desarj."}
+  - {csv: pack_power_w, eng: pack_power_w_logged, scale: 1, unit: W, logged: true, group: hv, note: "Isaretsiz. Regen 0 yazilir."}
+  - {csv: pwr_scale_permille, eng: pwr_scale, scale: 0.001, unit: "1", logged: true, group: hv}
+  - {csv: tq_cmd_cNm_fl, eng: tq_cmd_fl, scale: 0.01, unit: Nm, logged: true, group: torque}
+  - {csv: tq_cmd_cNm_fr, eng: tq_cmd_fr, scale: 0.01, unit: Nm, logged: true, group: torque}
+  - {csv: tq_cmd_cNm_rl, eng: tq_cmd_rl, scale: 0.01, unit: Nm, logged: true, group: torque}
+  - {csv: tq_cmd_cNm_rr, eng: tq_cmd_rr, scale: 0.01, unit: Nm, logged: true, group: torque}
+  - {csv: tq_fb_cNm_fl, eng: tq_fb_fl, scale: 0.01, unit: Nm, logged: true, group: torque}
+  - {csv: tq_fb_cNm_fr, eng: tq_fb_fr, scale: 0.01, unit: Nm, logged: true, group: torque}
+  - {csv: tq_fb_cNm_rl, eng: tq_fb_rl, scale: 0.01, unit: Nm, logged: true, group: torque}
+  - {csv: tq_fb_cNm_rr, eng: tq_fb_rr, scale: 0.01, unit: Nm, logged: true, group: torque}
+  - {csv: rpm_fl, eng: rpm_fl, scale: 1, unit: rpm, logged: true, group: speed}
+  - {csv: rpm_fr, eng: rpm_fr, scale: 1, unit: rpm, logged: true, group: speed}
+  - {csv: rpm_rl, eng: rpm_rl, scale: 1, unit: rpm, logged: true, group: speed}
+  - {csv: rpm_rr, eng: rpm_rr, scale: 1, unit: rpm, logged: true, group: speed}
+  - {csv: slip_permille_fl, eng: slip_fl, scale: 0.001, unit: "1", logged: true, group: slip, source: "(v_wheel-v_ref)/max(|v_ref|,1)"}
+  - {csv: slip_permille_fr, eng: slip_fr, scale: 0.001, unit: "1", logged: true, group: slip}
+  - {csv: slip_permille_rl, eng: slip_rl, scale: 0.001, unit: "1", logged: true, group: slip}
+  - {csv: slip_permille_rr, eng: slip_rr, scale: 0.001, unit: "1", logged: true, group: slip}
+  - {csv: dc_v_10mV_fl, eng: dc_v_fl, scale: 0.01, unit: V, logged: true, group: inverter_dc, dtype: int16, note: "Firmware su an 0 yazar. int16 tavan 327.67 V."}
+  - {csv: dc_v_10mV_fr, eng: dc_v_fr, scale: 0.01, unit: V, logged: true, group: inverter_dc, dtype: int16}
+  - {csv: dc_v_10mV_rl, eng: dc_v_rl, scale: 0.01, unit: V, logged: true, group: inverter_dc, dtype: int16}
+  - {csv: dc_v_10mV_rr, eng: dc_v_rr, scale: 0.01, unit: V, logged: true, group: inverter_dc, dtype: int16}
+  - {csv: dc_i_10mA_fl, eng: dc_i_fl, scale: 0.01, unit: A, logged: true, group: inverter_dc, dtype: int16}
+  - {csv: dc_i_10mA_fr, eng: dc_i_fr, scale: 0.01, unit: A, logged: true, group: inverter_dc, dtype: int16}
+  - {csv: dc_i_10mA_rl, eng: dc_i_rl, scale: 0.01, unit: A, logged: true, group: inverter_dc, dtype: int16}
+  - {csv: dc_i_10mA_rr, eng: dc_i_rr, scale: 0.01, unit: A, logged: true, group: inverter_dc, dtype: int16}
+  - {csv: igbt_cdeg_fl, eng: igbt_c_fl, scale: 0.01, unit: C, logged: true, group: thermal}
+  - {csv: igbt_cdeg_fr, eng: igbt_c_fr, scale: 0.01, unit: C, logged: true, group: thermal}
+  - {csv: igbt_cdeg_rl, eng: igbt_c_rl, scale: 0.01, unit: C, logged: true, group: thermal}
+  - {csv: igbt_cdeg_rr, eng: igbt_c_rr, scale: 0.01, unit: C, logged: true, group: thermal}
+  - {csv: motor_cdeg_fl, eng: motor_c_fl, scale: 0.01, unit: C, logged: true, group: thermal}
+  - {csv: motor_cdeg_fr, eng: motor_c_fr, scale: 0.01, unit: C, logged: true, group: thermal}
+  - {csv: motor_cdeg_rl, eng: motor_c_rl, scale: 0.01, unit: C, logged: true, group: thermal}
+  - {csv: motor_cdeg_rr, eng: motor_c_rr, scale: 0.01, unit: C, logged: true, group: thermal}
+  - {csv: inv_state_fl, eng: inv_state_fl, scale: 1, unit: enum, logged: true, group: inverter_state, resample: ffill}
+  - {csv: inv_state_fr, eng: inv_state_fr, scale: 1, unit: enum, logged: true, group: inverter_state, resample: ffill}
+  - {csv: inv_state_rl, eng: inv_state_rl, scale: 1, unit: enum, logged: true, group: inverter_state, resample: ffill}
+  - {csv: inv_state_rr, eng: inv_state_rr, scale: 1, unit: enum, logged: true, group: inverter_state, resample: ffill}
+  - {csv: brake_f_bar, eng: brake_f_bar, scale: 1, unit: bar, logged: true, group: brake, note: "uint8 kesme"}
+  - {csv: brake_r_bar, eng: brake_r_bar, scale: 1, unit: bar, logged: true, group: brake}
+  - {csv: sdc_flags, eng: sdc_flags, scale: 1, unit: bitfield, logged: true, group: safety, resample: ffill}
+  - {csv: fault_reason, eng: fault_reason, scale: 1, unit: enum, logged: true, group: safety, resample: ffill}
+
+  # Mimaride sart, firmware log cercevesinde yok. Sutun gelirse olceklenir.
+  - {csv: lv_v_10mV, eng: lv_v, scale: 0.01, unit: V, logged: false, required: true, group: lv, source: "CAN 0x131 cozulmuyor. ADC1 INP2 PF11 orneklenip atiliyor."}
+  - {csv: lv_i_10mA, eng: lv_i, scale: 0.01, unit: A, logged: false, required: true, group: lv}
+  - {csv: apps_raw1, eng: apps_raw1, scale: 1, unit: count, logged: false, required: true, group: driver, source: "ADC1 INP18 PA4 APPS1. Logda yalnizca apps_pct/apps_status."}
+  - {csv: apps_raw2, eng: apps_raw2, scale: 1, unit: count, logged: false, required: true, group: driver, source: "ADC1 INP19 PA5 APPS2"}
+  - {csv: piezo1, eng: piezo1, scale: 1, unit: count, logged: false, required: true, group: chassis, note: "Sasi titreşim kanali kodda yok."}
+  - {csv: piezo2, eng: piezo2, scale: 1, unit: count, logged: false, required: true, group: chassis}
+  - {csv: ax_cmps2, eng: ax_mps2, scale: 0.01, unit: m/s2, logged: false, required: true, group: imu, source: "IMU accel X CAN'de var, loga yazilmiyor."}
+  - {csv: ay_cmps2, eng: ay_mps2, scale: 0.01, unit: m/s2, logged: false, required: true, group: imu}
+  - {csv: cell_vmin_mV, eng: cell_vmin, scale: 0.001, unit: V, logged: false, required: true, group: hv}
+  - {csv: ams_led, eng: ams_led, scale: 1, unit: bool, logged: false, required: true, group: safety, resample: ffill}
+  - {csv: imd_led, eng: imd_led, scale: 1, unit: bool, logged: false, required: true, group: safety, resample: ffill}
+  - {csv: tsal_green, eng: tsal_green, scale: 1, unit: bool, logged: false, required: true, group: safety, resample: ffill}
+  - {csv: speed1_rpm, eng: speed1_rpm, scale: 1, unit: rpm, logged: false, required: true, group: speed, note: "Ayri teker hiz sensoru yok; rpm inverter geri bildirimi."}
+  - {csv: speed2_rpm, eng: speed2_rpm, scale: 1, unit: rpm, logged: false, required: true, group: speed}
+
+firmware_gaps:
+  - "LV 24 V (CAN 0x131 ve ADC rank5) log cercevesine yazilmiyor."
+  - "APPS1/APPS2 ham ADC loglanmiyor; sapma yalnizca apps_status bitlerinden okunur."
+  - "IMU accel ve euler loglanmiyor; yalnizca yaw hizi var. G-G diyagrami vx turevi ve yaw*vx ile turetilir."
+  - "PIEZO, GPS, damper (0x1F1-0x1F5) ve hucre voltajlari loglanmiyor."
+  - "AMK error_info, derating biti ve inverter sogutucu sicakligi (ACT2 b2-3) loglanmiyor; IGBT ve motor sicakligi var."
+  - "AMS_LED / IMD_LED / TSAL_GREEN ayri loglanmiyor. sdc_flags bit2 IMD_OK, bit3 AMS_OK."
+  - "TV/TC/launch kancalari control_hooks.c icinde notr (moment 0, TC olcegi 1)."
